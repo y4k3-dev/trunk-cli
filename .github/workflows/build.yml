@@ -1,0 +1,57 @@
+name: Auto-Build Trunk CLI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    permissions:
+      contents: write 
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC Compiler
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup Lua & LuaRocks (via Hererocks)
+        run: |
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/luarocks/hererocks/master/hererocks.py" -OutFile "hererocks.py"
+          python hererocks.py lua_env --lua 5.1 --luarocks latest
+          
+          # Add the newly compiled Lua environment to the system PATH
+          echo "$PWD\lua_env\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install LuaFileSystem
+        run: luarocks install luafilesystem
+
+      - name: Package Standalone Bundle
+        run: |
+          mkdir trunk-release
+          copy main.lua trunk-release\
+          copy trunk.bat trunk-release\
+          
+          # Grab the compiled DLL directly from the hererocks environment
+          copy "lua_env\lib\lua\5.1\lfs.dll" trunk-release\
+          
+          # Zip the folder so it can be attached to the GitHub Release
+          Compress-Archive -Path trunk-release\* -DestinationPath trunk-windows-cli.zip
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trunk-windows-cli
+          path: trunk-release/
+
+      - name: Publish to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: trunk-windows-cli.zip
+          generate_release_notes: true
